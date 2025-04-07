@@ -10,7 +10,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"sort"
+	"strings"
 )
 
 func New() http.Handler {
@@ -69,11 +71,9 @@ func packageHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	// review: ignoring errors from `w.Write` could hide failed responses like when a client disconnects
-	outStatus, err := w.Write(output)
-	if err != nil || outStatus != http.StatusOK {
-		log.Printf("Error writing response: %v %v", outStatus, err)
-		return
+	n, err := w.Write(output)
+	if err != nil {
+		log.Printf("Error writing response body (%d bytes written): %v", n, err)
 	}
 }
 
@@ -114,7 +114,7 @@ func resolveDependencies(pkg *NpmPackageVersion, version string) error {
 }
 
 func highestCompatibleVersion(version string, pkgMeta *npmPackageMetaResponse) (string, error) {
-	constraint, err := semver.NewConstraint(version)
+	constraint, err := semver.NewConstraint(normalizeConstraint(version))
 	if err != nil {
 		return "", err
 	}
@@ -138,6 +138,23 @@ func filterCompatibleVersions(constraint *semver.Constraints, pkgMeta *npmPackag
 		}
 	}
 	return compatible
+}
+
+func normalizeConstraint(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "*" {
+		return ">= 0.0.0"
+	}
+	if raw == "" {
+		return ">= 0.0.0"
+	}
+	if matched, _ := regexp.MatchString(`^\d+$`, raw); matched {
+		return raw + ".x.x"
+	}
+	if matched, _ := regexp.MatchString(`^\d+\.\d+$`, raw); matched {
+		return raw + ".x"
+	}
+	return raw
 }
 
 func fetchPackage(name, version string) (*npmPackageResponse, error) {
